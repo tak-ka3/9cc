@@ -6,6 +6,7 @@
 #include <string.h>
 
 // トークンの種類
+// enumは複数の変数に一連の整数値をつける
 typedef enum {
   TK_RESERVED, // 記号
   TK_NUM, // 整数トークン
@@ -18,6 +19,10 @@ typedef enum {
   ND_SUB, // -
   ND_MUL, // *
   ND_DIV, // /
+  ND_SE, // ==
+  ND_SNE, // !=
+  ND_SL, // set less than <
+  ND_SLE, // set less than equal <=
   ND_NUM, // 整数
 } NodeKind;
 
@@ -36,6 +41,7 @@ struct Token {
   Token *next; // 次の入力トークン
   int val; // kindがTK_NUMの場合、その数値
   char *str; // トークン文字列
+  int len; // トークンの長さ
 };
 
 // トークン列をパースして抽象構文木に変換する
@@ -85,8 +91,10 @@ void error(char *fmt, ...) {
 
 // トークンが期待しているものであるときはトークンを一つ読み進めて
 // 真を返す。それ以外の場合は偽を返す。
-bool consume(char op) {
-  if (token->kind != TK_RESERVED || token->str[0] != op) {
+bool consume(char *op) {
+  if (token->kind != TK_RESERVED || 
+      strlen(op) != token->len ||
+      memcmp(token->str, op, token->len)) {
     return false;
   }
   token = token->next;
@@ -95,8 +103,10 @@ bool consume(char op) {
 
 // 次のトークンが期待している記号の時は、トークンを一つ読み進める
 // それ以外の時はエラーを報告する
-void expect(char op) {
-  if (token->kind != TK_RESERVED || token->str[0] != op) {
+void expect(char *op) {
+  if (token->kind != TK_RESERVED || 
+      strlen(op) != token->len || 
+      memcmp(token->str, op, token->len)) {
     error("This is not '%c'", op);
   }
   token = token->next;
@@ -173,18 +183,18 @@ Node *new_node_num(int val) {
 }
 
 Node *primary() {
-  if (consume('(')) {
+  if (consume("(")) {
     Node *node = expr();
-    expect(')');
+    expect(")");
     return node;
   }
   return new_node_num(expect_number()); // 数値はここでのみ返される
 }
 
 Node *unary() {
-  if (consume('+'))
+  if (consume("+"))
     return primary();
-  if (consume('-'))
+  if (consume("-"))
     return new_node(ND_SUB, new_node_num(0), primary());
   return primary();
 }
@@ -193,9 +203,9 @@ Node *mul() {
   Node *node = unary();
 
   for (;;) {
-    if (consume('*')) {
+    if (consume("*")) {
       node = new_node(ND_MUL, node, unary());
-    } else if (consume('/')) {
+    } else if (consume("/")) {
       node = new_node(ND_DIV, node, unary());
     } else {
       return node;
@@ -203,14 +213,60 @@ Node *mul() {
   }
 }
 
-Node *expr() {
+Node *add() {
   Node *node = mul();
 
-  for (;;) {
-    if (consume('+')) {
+  for(;;) {
+    if (consume("+")) {
       node = new_node(ND_ADD, node, mul());
-    } else if (consume('-')) {
+    } else if (consume("-")) {
       node = new_node(ND_SUB, node, mul());
+    } else {
+      return node;
+    }
+  }
+}
+
+Node *relational() {
+  Node *node = add();
+
+  for(;;) {
+    if (consume("<=")) {
+      node = new_node(ND_SLE, node, add());
+    } else if (consume(">=")) {
+      node = new_node(ND_SLE, add(), node);
+    } else if (consume("<")) {
+      node = new_node(ND_SL, node, add());
+    } else if (consume(">")) {
+      node = new_node(ND_SL, add(), node);
+    } else {
+      return node;
+    }
+  }
+}
+
+Node *equality() {
+  Node *node = relational();
+
+  for (;;) {
+    if (consume("==")) {
+      node = new_node(ND_SE, node, relational());
+    } else if (consume("!=")) {
+      node = new_node(ND_SNE, node, relational());
+    } else {
+      return node;
+    }
+  }
+}
+
+Node *expr() {
+  Node *node = equality();
+
+  for (;;) {
+    if (consume("+")) {
+      node = new_node(ND_ADD, node, equality());
+    } else if (consume("-")) {
+      node = new_node(ND_SUB, node, equality());
     } else {
       return node;
     }
@@ -241,6 +297,25 @@ void gen(Node *node) {
     case ND_DIV:
       printf("  cqo\n");
       printf("  idiv rdi\n");
+      break;
+    case ND_SE:
+      printf("  cmp rax, rdi\n");
+      printf("  sete al");
+      printf("  movzb rax, al");
+    case ND_SNE:
+      printf("  cmp rax, rdi\n");
+      printf("  setne al");
+      printf("  movzb rax, al");
+      break;
+    case ND_SLE:
+      printf("  cmp rax, rdi\n");
+      printf("  setle al");
+      printf("  movzb rax, al");
+      break;
+    case ND_SL:
+      printf("  cmp rax, rdi\n");
+      printf("  setl al");
+      printf("  movzb rax, al");
       break;
     default:
       error("error node kind\n");
