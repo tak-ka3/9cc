@@ -107,7 +107,7 @@ void expect(char *op) {
   if (token->kind != TK_RESERVED || 
       strlen(op) != token->len || 
       memcmp(token->str, op, token->len)) {
-    error("This is not '%c'", op);
+    error_at(token->str, "expected \"%s\"", op);
   }
   token = token->next;
 }
@@ -125,12 +125,17 @@ int expect_number() {
 
 // 新しいトークンを作成してcurに繋げる
 // curという現在のtokenから新しいtokというトークンを作る
-Token *new_token(TokenKind kind, Token *cur, char *str) {
+Token *new_token(TokenKind kind, Token *cur, char *str, int len) {
   Token *tok = calloc(1, sizeof(Token));
   tok->kind = kind;
   tok->str = str;
+	tok->len = len;
   cur->next = tok;
   return tok;
+}
+
+bool startwith(char *p, char *q) {
+	return memcmp(p, q, strlen(q)) == 0;
 }
 
 bool at_eof() {
@@ -151,19 +156,29 @@ Token *tokenize(char *p) {
       p++;
       continue;
     }
-    if (strchr("+-*/()", *p)) {
-      cur = new_token(TK_RESERVED, cur, p++);
+		// Multi-letter punctuator
+		if (startwith(p, "==") || startwith(p, "!=") ||
+				startwith(p, "<=") || startwith(p, ">=")) {
+					cur = new_token(TK_RESERVED, cur, p, 2);
+					p += 2;
+					continue;
+		}
+		// Single-letter punctuator
+    if (strchr("+-*/()<>", *p)) {
+      cur = new_token(TK_RESERVED, cur, p++, 1);
       continue;
     }
     if (isdigit(*p)) {
-      cur = new_token(TK_NUM, cur, p);
+      cur = new_token(TK_NUM, cur, p, 0);
+			char *q = p;
       cur->val = strtol(p, &p, 10); // ここで、pのアドレスを更新している
-      continue;
+      cur->len = p - q;
+			continue;
     }
 
     error("cannot tokenize");
   }
-  new_token(TK_EOF, cur, p);
+  new_token(TK_EOF, cur, p, 0);
   return head.next;
 }
 
@@ -300,22 +315,23 @@ void gen(Node *node) {
       break;
     case ND_SE:
       printf("  cmp rax, rdi\n");
-      printf("  sete al");
-      printf("  movzb rax, al");
+      printf("  sete al\n");
+      printf("  movzb rax, al\n");
+			break;
     case ND_SNE:
       printf("  cmp rax, rdi\n");
-      printf("  setne al");
-      printf("  movzb rax, al");
+      printf("  setne al\n");
+      printf("  movzb rax, al\n");
       break;
     case ND_SLE:
       printf("  cmp rax, rdi\n");
-      printf("  setle al");
-      printf("  movzb rax, al");
+      printf("  setle al\n");
+      printf("  movzb rax, al\n");
       break;
     case ND_SL:
       printf("  cmp rax, rdi\n");
-      printf("  setl al");
-      printf("  movzb rax, al");
+      printf("  setl al\n");
+      printf("  movzb rax, al\n");
       break;
     default:
       error("error node kind\n");
